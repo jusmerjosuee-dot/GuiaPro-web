@@ -251,7 +251,51 @@ el('formPago').addEventListener('submit',e=>{e.preventDefault();const d=Object.f
 if(!storageError){sincronizarFinanzas();save()}
 if(storageError)alert('Atención: se detectaron datos locales dañados. Evita guardar o restaurar hasta respaldar y revisar el problema.');
 mostrar('inicio');
-</script><script>
+</script>
+
+<script>
+// GuíaPro Web v0.4.7.1
+// Registro del Service Worker para funcionamiento offline.
+
+if (
+  'serviceWorker' in navigator &&
+  location.protocol === 'https:'
+) {
+
+  window.addEventListener('load', async () => {
+
+    try {
+
+      const registro = await navigator.serviceWorker.register(
+        './sw.js',
+        {
+          scope: './',
+          updateViaCache: 'none'
+        }
+      );
+
+      await registro.update();
+
+      console.log(
+        'GuíaPro: sistema offline registrado correctamente.'
+      );
+
+    } catch (error) {
+
+      console.error(
+        'GuíaPro: error al activar modo offline:',
+        error
+      );
+
+    }
+
+  });
+
+}
+</script>
+
+</body>
+</html>
 // Registrar caché offline solo desde HTTPS, no al abrir archivos locales.
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(err => console.warn('Sin caché offline:', err)));
