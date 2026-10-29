@@ -1,13 +1,12 @@
 {
-  "name": "GuíaPro - Gestión para guías de turismo",
+  "name": "GuíaPro — Guía de Turismo",
   "short_name": "GuíaPro",
-  "description": "Agenda, endosos, contactos y finanzas para guías de turismo.",
-  "start_url": "./index.html",
+  "description": "Agenda, tours, endosos y finanzas sin internet",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f4f7f5",
   "theme_color": "#103e36",
-  "lang": "es-PE",
   "icons": [
     {
       "src": "./icons/icon-192.png",
