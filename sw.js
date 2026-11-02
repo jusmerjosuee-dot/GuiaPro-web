@@ -1,7 +1,7 @@
-// GuíaPro Web v0.4.9
-// Actualización automática de interfaz con soporte offline.
+// GuíaPro Web v0.4.10
+// Service Worker: actualización online y funcionamiento offline.
 
-const CACHE = 'guiapro-pwa-049';
+const CACHE = 'guiapro-pwa-0410';
 
 const CORE = [
   './index.html',
@@ -19,14 +19,17 @@ self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
 
+    // Guardar los archivos principales.
     await cache.addAll(CORE);
 
+    // Guardar iconos disponibles.
     await Promise.all(
       OPTIONAL.map(url =>
         cache.add(url).catch(() => {})
       )
     );
 
+    // Activar la actualización sin esperar al cierre.
     await self.skipWaiting();
   })());
 });
@@ -36,6 +39,7 @@ self.addEventListener('activate', event => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
 
+    // Eliminar versiones anteriores de GuíaPro.
     await Promise.all(
       keys
         .filter(key =>
@@ -45,25 +49,25 @@ self.addEventListener('activate', event => {
         .map(key => caches.delete(key))
     );
 
+    // Controlar las pestañas abiertas.
     await self.clients.claim();
   })());
 });
 
-// INTERCEPTAR SOLICITUDES
+// SOLICITUDES
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
   const scope = new URL(self.registration.scope);
 
+  // No interceptar solicitudes externas.
   if (
     url.origin !== self.location.origin ||
     !url.pathname.startsWith(scope.pathname)
   ) return;
 
-  // NAVEGACIÓN: intentar obtener la versión nueva.
-  self.addEventListener;
-
+  // NAVEGACIÓN: primero internet, después caché.
   if (event.request.mode === 'navigate') {
     event.respondWith((async () => {
       try {
@@ -71,7 +75,11 @@ self.addEventListener('fetch', event => {
 
         if (response.ok) {
           const cache = await caches.open(CACHE);
-          await cache.put('./index.html', response.clone());
+
+          await cache.put(
+            './index.html',
+            response.clone()
+          );
         }
 
         return response;
@@ -90,7 +98,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // ARCHIVOS ESTÁTICOS
+  // ARCHIVOS ESTÁTICOS: caché primero.
   event.respondWith((async () => {
     const cached = await caches.match(event.request);
 
