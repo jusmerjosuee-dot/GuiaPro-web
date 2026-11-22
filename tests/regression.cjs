@@ -18,3 +18,16 @@ test('reverse without mutating original',()=>{const next=a(base,p(rows,120000),m
 test('idempotency',()=>{const q=p(rows,120000);assert.throws(()=>a(a(base,q,meta),q,meta))});
 test('stale selection',()=>assert.throws(()=>a(base.slice(1),p(rows,120000),meta)));
 test('preserve previous payment',()=>{const initial=[{id:'0',monto:100,pagos:[{id:'previo',monto:'20.00'}]}];const next=a(initial,p([{id:'0',saldo:8000}],8000),meta);assert.equal(r(next,meta.id)[0].pagos[0].id,'previo')});
+
+const validate=new Function(html.slice(html.indexOf('function validarRespaldo'),html.indexOf('async function importar'))+';return validarRespaldo')();
+const fixture={app:'GuíaPro',version:2,settings:{margen:15},tours:[{id:'tour_1',nombre:'Prueba',fecha:'2026-11-21',hora:'09:00',salida:'11:00'}],blocks:[]};
+test('v2 legacy backup',()=>assert.equal(validate(fixture),fixture));
+test('v3 backup',()=>assert.equal(validate({...fixture,version:3,contactos:[],endosos:[]}).version,3));
+test('v4 batch payments in backup',()=>{const cuentas=a(base,p(rows,120000),meta).map(c=>({...c,tipo:'Cobrar'}));assert.equal(validate({...fixture,version:4,contactos:[],endosos:[],cuentas}).cuentas.length,12)});
+test('v5 backup roundtrip preserves batch metadata',()=>{const cuentas=a(base,p(rows,130000),{...meta,total:130000}).map(c=>({...c,tipo:'Cobrar'}));const file={...fixture,version:5,contactos:[],endosos:[],cuentas};assert.deepEqual(validate(JSON.parse(JSON.stringify(file))),file)});
+test('reject duplicate tour IDs',()=>assert.throws(()=>validate({...fixture,tours:[...fixture.tours,...fixture.tours]})));
+test('reject unsafe imported ID',()=>assert.throws(()=>validate({...fixture,tours:[{...fixture.tours[0],id:"bad'id"}]})));
+test('reject excess paid amount',()=>assert.throws(()=>validate({...fixture,version:5,contactos:[],endosos:[],cuentas:[{id:'a1',tipo:'Cobrar',monto:1,pagos:[{monto:2}]}]})));
+test('reject invalid payment amount',()=>assert.throws(()=>validate({...fixture,version:5,contactos:[],endosos:[],cuentas:[{id:'a1',tipo:'Cobrar',monto:1,pagos:[{monto:'no'}]}]})));
+test('theme state options and reduced motion',()=>{assert.ok(html.includes('id="temaSelect"'));assert.ok(html.includes('prefers-reduced-motion:reduce'));assert.ok(html.includes("const KTEMA='guiapro_tema_v1'"))});
+test('storage read error flag declared before first read',()=>assert.ok(html.indexOf('let storageError=false')<html.indexOf('let gcal=read')));
