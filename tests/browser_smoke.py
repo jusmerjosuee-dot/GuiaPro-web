@@ -1,0 +1,93 @@
+"""Synthetic browser regression: no real clients or external services."""
+import json
+import threading
+from datetime import date, timedelta
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from playwright.sync_api import sync_playwright, expect
+
+server=ThreadingHTTPServer(("127.0.0.1",0),SimpleHTTPRequestHandler)
+threading.Thread(target=server.serve_forever,daemon=True).start()
+url=f"http://127.0.0.1:{server.server_port}/index.html"
+contact={"id":"agency_test","tipo":"Agencia","nombre":"Agencia de prueba"}
+future=(date.today()+timedelta(days=2)).isoformat()
+tours=[{"id":f"tour_{i}","nombre":f"Pax de prueba {i}","fecha":(date.today()+timedelta(days=i+3)).isoformat(),"ingreso":"09:00","hora":"09:00","duracion":"150","estado":"Confirmado","origen":"Agencia","contacto":contact["nombre"],"contactoId":contact["id"],"pax":"2","tarifa":"100","notas":"Nota ficticia"} for i in range(12)]
+seed={"guiapro_tours_v1":tours,"guiapro_contactos_v3":[contact]}
+with sync_playwright() as p:
+    browser=p.chromium.launch(headless=True)
+    context=browser.new_context(viewport={"width":390,"height":844})
+    page=context.new_page()
+    errors=[]
+    page.on("pageerror",lambda e: errors.append(str(e)))
+    page.on("dialog",lambda d:d.accept())
+    page.goto(url)
+    page.evaluate("(data) => {for(const [k,v] of Object.entries(data)) localStorage.setItem(k,JSON.stringify(v));}",seed)
+    page.reload()
+    expect(page.locator("#total")).to_have_text("12")
+    expect(page.locator("#inicioLista")).to_contain_text("Nota ficticia")
+    print("PASS start, local data and home notes",flush=True)
+    for width in (320,390,768,1440):
+        page.set_viewport_size({"width":width,"height":850})
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"),f"Page overflow at {width}"
+    print("PASS four viewport widths",flush=True)
+    page.locator("#nav-ajustes").click()
+    page.locator("#temaSelect").select_option("dark")
+    expect(page.locator("html")).to_have_attribute("data-theme","dark")
+    page.reload()
+    expect(page.locator("html")).to_have_attribute("data-theme","dark")
+    print("PASS dark mode persistence",flush=True)
+    page.locator("#nav-nuevo").click()
+    page.locator("#tourPaxNombre").fill("Nuevo pax ficticio")
+    page.locator("#tourFecha").fill(future)
+    page.locator("#tourIngreso").select_option("08:00")
+    page.locator("#tourCircuito").select_option("Circuito 2")
+    page.locator("#tourRuta").select_option("B")
+    page.locator("#tourNotas").fill("Nueva nota de prueba")
+    page.locator("#formTour button[type=submit]").click()
+    expect(page.locator("#listaTours")).to_contain_text("Nuevo pax ficticio")
+    page.locator("#nav-inicio").click()
+    expect(page.locator("#inicioLista")).to_contain_text("Nueva nota de prueba")
+    print("PASS new tour with notes",flush=True)
+    page.locator("#nav-finanzas").click()
+    page.locator("#filtroContactoFin").select_option("id:agency_test")
+    expect(page.locator("#finCobrar")).to_have_text("S/ 1200.00")
+    page.get_by_role("button",name="Asistente financiero",exact=False).first.click()
+    expect(page.locator("#panelAsistenteFin")).to_be_visible()
+    page.locator("#preguntaFin").fill("¿Cuánto me debe Agencia de prueba?")
+    page.locator("#panelAsistenteFin").get_by_role("button",name="Consultar",exact=True).click()
+    expect(page.locator("#respuestaFin")).to_contain_text("1200.00")
+    page.get_by_role("button",name="Liquidación agrupada",exact=True).click()
+    page.locator("#loteMonto").fill("1200")
+    page.get_by_role("button",name="Seleccionar todos",exact=True).click()
+    page.locator("#loteConfirmar").click()
+    expect(page.locator("#finCobrar")).to_have_text("S/ 0.00")
+    expect(page.locator("#finIngresos")).to_have_text("S/ 1200.00")
+    expect(page.locator("#tituloHistorialCuentas")).to_contain_text("(12)")
+    page.get_by_text("Historial de liquidaciones agrupadas",exact=True).click()
+    page.get_by_role("button",name="Revertir liquidación",exact=True).click()
+    expect(page.locator("#finCobrar")).to_have_text("S/ 1200.00")
+    print("PASS batch payment and reversal with actual UI",flush=True)
+    page.get_by_role("button",name="Liquidación agrupada",exact=True).click()
+    page.locator("#loteMonto").fill("1200")
+    page.get_by_role("button",name="Seleccionar todos",exact=True).click()
+    page.locator("#loteConfirmar").click()
+    backup=page.evaluate("textoRespaldo()")
+    parsed=json.loads(backup)
+    assert len(parsed["cuentas"])==12 and all(c["pagos"] for c in parsed["cuentas"])
+    assert sum(bool(p.get("loteId")) for c in parsed["cuentas"] for p in c["pagos"])==12
+    page.locator("#nav-ajustes").click()
+    page.evaluate("""async content => {const file = new File([content], 'test.json', {type:'application/json'}); await importar({target:{files:[file],value:''}})}""",backup)
+    page.locator("#nav-finanzas").click()
+    expect(page.locator("#finIngresos")).to_have_text("S/ 1200.00")
+    print("PASS backup roundtrip with batch metadata",flush=True)
+    page.evaluate("navigator.serviceWorker.ready")
+    page.wait_for_function("navigator.serviceWorker.controller !== null")
+    context.set_offline(True)
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator("#total")).to_have_text("13")
+    expect(page.locator("#estadoConexion")).to_have_text("Sin conexión")
+    page.locator("#nav-finanzas").click()
+    expect(page.locator("#finIngresos")).to_have_text("S/ 1200.00")
+    print("PASS offline reload and finance persistence",flush=True)
+    assert not errors,errors
+    browser.close()
+server.shutdown()
