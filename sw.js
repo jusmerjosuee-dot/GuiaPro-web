@@ -1,5 +1,5 @@
-// GuíaPro Web 2.0-dev.1 — archivos públicos de interfaz, sin datos personales.
-const CACHE = 'guiapro-pwa-2-dev1';
+// GuíaPro Web 2.0-dev.2 — archivos públicos de interfaz, sin datos personales.
+const CACHE = 'guiapro-pwa-2-dev2';
 const CORE = ['./index.html', './manifest.webmanifest'];
 const OPTIONAL = ['./icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 
