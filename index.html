@@ -58,7 +58,36 @@ const today=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMon
 let selected=today(),month=selected.slice(0,7);
 const el=id=>document.getElementById(id),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function uid(){return (globalThis.crypto&&crypto.randomUUID)?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2)}
-function save(){if(storageError){alert('Hay datos previos que no se pudieron leer. No se sobrescribirán.');return false}try{localStorage.setItem(KTOURS,JSON.stringify(tours));localStorage.setItem(KBLOCKS,JSON.stringify(blocks));localStorage.setItem(KSET,JSON.stringify(settings));localStorage.setItem(KCONTACTOS,JSON.stringify(contactos));localStorage.setItem(KENDOSOS,JSON.stringify(endosos));localStorage.setItem(KCUENTAS,JSON.stringify(cuentas));return true}catch(e){alert('No se pudieron guardar los cambios.');return false}}
+const clavesDatos=[KTOURS,KBLOCKS,KSET,KCONTACTOS,KENDOSOS,KCUENTAS];
+let baseLocal={};
+try{baseLocal=Object.fromEntries(clavesDatos.map(k=>[k,localStorage.getItem(k)]))}catch{storageError=true}
+function escribirCambiosLocal(store,base,cambios){
+ for(const k of Object.keys(base))if(store.getItem(k)!==base[k])throw Error('Los datos cambiaron en otra pestaña. Exporta o recarga antes de seguir.');
+ const escritos=[];
+ try{
+  for(const [k,v] of Object.entries(cambios)){
+   if(base[k]===v)continue;
+   if(store.getItem(k)!==base[k])throw Error('Los datos cambiaron durante el guardado.');
+   store.setItem(k,v);escritos.push(k);
+  }
+ }catch(e){
+  let rollback=true;
+  for(const k of escritos.reverse()){
+   try{if(store.getItem(k)!==cambios[k]){rollback=false;continue}if(base[k]===null)store.removeItem(k);else store.setItem(k,base[k])}catch{rollback=false}
+  }
+  if(!rollback){const err=Error('Guardado incompleto. No sigas editando; conserva un respaldo y recarga.');err.grave=true;throw err}
+  throw e;
+ }
+ return {...base,...cambios};
+}
+function guardarCambios(cambios){
+ if(storageError)throw Error('Hay datos locales dañados; no se sobrescribirán.');
+ try{baseLocal=escribirCambiosLocal(localStorage,baseLocal,cambios)}catch(e){if(e.grave)storageError=true;throw e}
+}
+function save(){
+ try{guardarCambios({[KTOURS]:JSON.stringify(tours),[KBLOCKS]:JSON.stringify(blocks),[KSET]:JSON.stringify(settings),[KCONTACTOS]:JSON.stringify(contactos),[KENDOSOS]:JSON.stringify(endosos),[KCUENTAS]:JSON.stringify(cuentas)});return true}
+ catch(e){alert('No se guardaron los cambios: '+e.message);return false}
+}
 function mostrar(id){const target=el(id);if(!target)return;const previo=document.querySelector('main section:not(.hidden)')?.id;document.querySelectorAll('main section').forEach(s=>s.classList.toggle('hidden',s.id!==id));const grupo={bloqueoForm:"agenda",contactoForm:"contactos",endosoForm:"endosos",cuentaForm:"finanzas",pagoForm:"finanzas"}[id]||id;document.querySelectorAll('nav button').forEach(b=>{const activo=b.id==='nav-'+grupo;b.classList.toggle('active',activo);if(activo)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});render();if(previo!==id){window.scrollTo(0,0);el("contenido").focus({preventScroll:true})}}
 function mins(t){if(!/^\d\d:\d\d$/.test(t||''))return null;const [h,m]=t.split(':').map(Number);return h<24&&m<60?h*60+m:null}
 function horaInicio(a){return a.tipo==='bloqueo'?mins(a.inicio):mins(a.ingreso||a.hora)}
@@ -156,7 +185,7 @@ el('formBloqueo').addEventListener('submit',e=>{e.preventDefault();const d=Objec
 function elegirDia(s){if(!s)return;selected=s;month=s.slice(0,7);renderCalendar()}
 function moverMes(n){const [y,m]=month.split('-').map(Number);const d=new Date(y,m-1+n,1);month=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;selected=month+'-01';renderCalendar()}
 function renderCalendar(){el('diaElegido').value=selected;const [y,m]=month.split('-').map(Number),first=new Date(y,m-1,1),count=new Date(y,m,0).getDate();el('mesTitulo').textContent=first.toLocaleDateString('es-PE',{month:'long',year:'numeric'});let html=['L','M','M','J','V','S','D'].map(d=>`<b style="text-align:center;font-size:11px">${d}</b>`).join('');const off=(first.getDay()+6)%7;for(let i=0;i<off;i++)html+='<div class="day blank"></div>';for(let i=1;i<=count;i++){const date=month+'-'+String(i).padStart(2,'0'),busy=activities().some(a=>a.fecha===date);html+=`<button class="day ${busy?'busy':''} ${selected===date?'selected':''}" onclick="elegirDia('${date}')">${i}</button>`}el('calendario').innerHTML=html;const a=activities().filter(x=>x.fecha===selected).sort((x,y)=>(x.inicio||x.ingreso||x.hora||'').localeCompare(y.inicio||y.ingreso||y.hora||''));el('agendaDia').innerHTML=a.length?a.map(x=>`<div class="entry"><b>${x.tipo==='bloqueo'?'🔒 ':'⛰️ '}${esc(label(x))}</b>${x.tipo==='tour'&&x.contacto?`<p class="muted">${x.origen==='Agencia'?'🏢 Agencia':'👤 Contacto'}: ${esc(x.contacto)}</p>`:''}<p class="muted">${esc(x.inicio||x.ingreso||x.hora)}–${esc(x.fin||(x.tipo==='tour'?formatearHora(horaFin(x)):x.salida)||'?')} ${x.tipo==='tour'?'· '+esc(x.ruta||''):''}</p>${clashes(x).length?'<p class="warning">⚠ Posible conflicto de horario. Puedes modificar o endosar un servicio.</p>':''}<button class="secondary" onclick="${x.tipo==='tour'?'editarTour':'editarBloqueo'}('${esc(x.id)}')">Editar</button>${x.tipo==='bloqueo'?`<button class="danger" onclick="borrarBloqueo('${esc(x.id)}')">Eliminar</button>`:''}</div>`).join(''):'<p class="muted">Sin actividades en esta fecha.</p>'}
-function cambiarMargen(v){settings.margen=Number(v);save();render()}
+function cambiarMargen(v){const anterior=settings;settings={...settings,margen:Number(v)};if(!save())settings=anterior;render()}
 function datosRespaldo(){return {app:'GuíaPro',version:5,exportedAt:new Date().toISOString(),tours,blocks,settings,contactos,endosos,cuentas}}
 function textoRespaldo(){return JSON.stringify(datosRespaldo(),null,2)}
 function descargarTexto(texto){const blob=new Blob([texto],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='GuiaPro-respaldo-'+today()+'.json';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}
@@ -195,14 +224,14 @@ function validarRespaldo(d){
  if(d.version>=4&&!unique(d.cuentas,c=>['Cobrar','Pagar'].includes(c.tipo)&&dinero(c.monto)&&Number(c.monto)>0&&Array.isArray(c.pagos)&&c.pagos.every(p=>obj(p)&&dinero(p.monto)&&Number(p.monto)>0&&(!p.loteId||id(p.loteId)))&&c.pagos.reduce((n,p)=>n+Math.round(Number(p.monto)*100),0)<=Math.round(Number(c.monto)*100)))throw Error('Cuentas financieras inválidas o pagos mayores al importe.');
  return d;
 }
-async function importar(event){const f=event.target.files?.[0];event.target.value='';if(!f)return;if(f.size>5*1024*1024){alert('El archivo es demasiado grande.');return}try{const d=JSON.parse(await f.text());validarRespaldo(d);if(!confirm(`El respaldo contiene ${d.tours.length} tours y ${d.blocks.length} bloqueos. REEMPLAZARÁ los datos actuales. ¿Continuar?`))return;const previo={tours,blocks,settings,contactos,endosos,cuentas};tours=d.tours;blocks=d.blocks;settings=d.settings;contactos=d.version>=3?d.contactos:[];endosos=d.version>=3?d.endosos:[];cuentas=d.version>=4?d.cuentas:[];if(!save()){tours=previo.tours;blocks=previo.blocks;settings=previo.settings;contactos=previo.contactos;endosos=previo.endosos;cuentas=previo.cuentas;return}selected=today();month=selected.slice(0,7);sincronizarFinanzas();save();render();alert('Respaldo restaurado.')}catch(err){alert('No se pudo importar: '+err.message)}}
+async function importar(event){const f=event.target.files?.[0];event.target.value='';if(!f)return;if(f.size>5*1024*1024){alert('El archivo es demasiado grande.');return}try{const d=JSON.parse(await f.text());validarRespaldo(d);if(!confirm(`El respaldo contiene ${d.tours.length} tours y ${d.blocks.length} bloqueos. REEMPLAZARÁ los datos actuales. ¿Continuar?`))return;const previo={tours,blocks,settings,contactos,endosos,cuentas};tours=d.tours;blocks=d.blocks;settings=d.settings;contactos=d.version>=3?d.contactos:[];endosos=d.version>=3?d.endosos:[];cuentas=d.version>=4?d.cuentas:[];try{sincronizarFinanzas()}catch(err){tours=previo.tours;blocks=previo.blocks;settings=previo.settings;contactos=previo.contactos;endosos=previo.endosos;cuentas=previo.cuentas;throw err}if(!save()){tours=previo.tours;blocks=previo.blocks;settings=previo.settings;contactos=previo.contactos;endosos=previo.endosos;cuentas=previo.cuentas;return}selected=today();month=selected.slice(0,7);render();alert('Respaldo restaurado.')}catch(err){alert('No se pudo importar: '+err.message)}}
 function recuperarEndososAnteriores(){
  const candidatos=tours.filter(t=>t.origen==='Endoso recibido'&&!endosos.some(e=>e.tourId===t.id&&e.tipo==='Recibido'));
  const sinContacto=candidatos.filter(t=>!String(t.contacto||'').trim());
  const listos=candidatos.filter(t=>String(t.contacto||'').trim());
  if(!listos.length){alert('No hay endosos antiguos pendientes de vinculación.'+(sinContacto.length?' Hay '+sinContacto.length+' tour(s) sin colega: edítalos para añadirlo.':''));return}
  if(!confirm('Se encontraron '+listos.length+' tours antiguos como «Endoso recibido» sin registro vinculado. Se crearán endosos y, si están confirmados o completados, cuentas por cobrar automáticas. Revisa que no hayas registrado manualmente estos compromisos en Finanzas para evitar duplicarlos. ¿Continuar?'))return;
- const prev={endosos,contactos,cuentas};
+ const prev=JSON.parse(JSON.stringify({endosos,contactos,cuentas}));
  endosos=[...endosos];contactos=[...contactos];cuentas=[...cuentas];
  for(const t of listos)sincronizarEndosoRecibido(t);
  sincronizarFinanzas();
@@ -213,8 +242,8 @@ function nombreColega(id){return contactos.find(c=>c.id===id)?.nombre||'Colega n
 function nuevoContacto(){el('formContacto').reset();el('formContacto').elements.id.value='';mostrar('contactoForm')}
 function editarContacto(id){const c=contactos.find(x=>x.id===id);if(!c)return;const f=el('formContacto');f.reset();for(const [k,v] of Object.entries(c))if(f.elements[k])f.elements[k].value=v;mostrar('contactoForm')}
 function renderContactos(){const q=el('buscarContacto').value.toLowerCase().trim();const cs=contactos.filter(c=>!c.archivado&&(c.nombre+' '+c.tipo).toLowerCase().includes(q));el('listaContactos').innerHTML=cs.length?cs.map(c=>`<div class="entry"><b>${esc(c.nombre)}</b><span class="tag">${esc(c.tipo)}</span><p class="muted">${esc(c.telefono||'Sin teléfono')} · ${esc(c.idiomas||'')}</p><button class="secondary" onclick="editarContacto('${c.id}')">Editar</button><button class="danger" onclick="archivarContacto('${c.id}')">Archivar</button></div>`).join(''):'<p class="muted">No hay contactos para mostrar.</p>'}
-function archivarContacto(id){if(!confirm('¿Archivar contacto? Se conservará su historial.'))return;const c=contactos.find(x=>x.id===id);if(!c)return;c.archivado=true;save();render()}
-el('formContacto').addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target)),old=contactos.find(c=>c.id===d.id),c={...old,...d,id:d.id||uid()};contactos=old?contactos.map(x=>x.id===c.id?c:x):[...contactos,c];if(save())mostrar('contactos')});
+function archivarContacto(id){if(!confirm('¿Archivar contacto? Se conservará su historial.'))return;const c=contactos.find(x=>x.id===id);if(!c)return;const anterior=contactos;contactos=contactos.map(x=>x.id===id?{...x,archivado:true}:x);if(!save())contactos=anterior;render()}
+el('formContacto').addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target)),old=contactos.find(c=>c.id===d.id),c={...old,...d,id:d.id||uid()};const anterior=contactos;contactos=old?contactos.map(x=>x.id===c.id?c:x):[...contactos,c];if(save())mostrar('contactos');else contactos=anterior});
 function nuevoEndoso(){if(!tours.length){alert('Primero registra un tour.');return}if(!contactos.some(c=>c.tipo==='Colega'&&!c.archivado)){alert('Primero registra un colega en el directorio.');return}const f=el('formEndoso');f.reset();f.elements.id.value='';el('endosoTour').innerHTML=tours.filter(t=>t.estado!=='Cancelado').map(t=>`<option value="${esc(t.id)}">${esc(t.nombre)} · ${esc(t.fecha)}</option>`).join('');el('endosoColega').innerHTML=contactos.filter(c=>c.tipo==='Colega'&&!c.archivado).map(c=>`<option value="${esc(c.id)}">${esc(c.nombre)}</option>`).join('');mostrar('endosoForm')}
 function editarEndoso(id){const e=endosos.find(x=>x.id===id);if(!e)return;nuevoEndoso();const f=el('formEndoso');if(![...el('endosoTour').options].some(o=>o.value===e.tourId))el('endosoTour').add(new Option('Tour archivado',e.tourId));if(![...el('endosoColega').options].some(o=>o.value===e.colegaId))el('endosoColega').add(new Option(nombreColega(e.colegaId),e.colegaId));for(const [k,v] of Object.entries(e))if(f.elements[k])f.elements[k].value=v}
 function renderEndosos(){el('listaEndosos').innerHTML=endosos.length?endosos.map(e=>{const t=tours.find(x=>x.id===e.tourId);return `<div class="entry"><b>${esc(e.tipo)} · ${esc(t?.nombre||'Tour no encontrado')}</b><p class="muted">${esc(nombreColega(e.colegaId))} · S/ ${Number(e.monto||0).toFixed(2)} · ${esc(e.estado)}</p>${e.tipo==='Entregado'&&e.estado==='Pendiente'?'<p class="warning">Pendiente: el horario sigue reservado.</p>':''}${e.tipo==='Entregado'&&e.estado==='Aceptado'?'<p class="info">Aceptado: el horario queda libre en tu agenda.</p>':''}<button class="secondary" onclick="editarEndoso('${e.id}')">Editar estado</button><button class="danger" onclick="borrarEndoso('${e.id}')">Eliminar</button></div>`}).join(''):'<p class="muted">Todavía no hay endosos.</p>'}
@@ -400,7 +429,7 @@ function planLoteActual(){
  return planificarLote(filas,montoLote(el('loteMonto').value),manual);
 }
 function resumenLote(){const b=el('loteConfirmar'),out=el('loteResumen');try{const p=planLoteActual();out.textContent='Seleccionado: '+sol(p.total)+' · Aplicado: '+sol(p.asignado)+' · Pendiente: '+sol(p.total-p.asignado)+' · Excedente: '+sol(p.excedente);b.disabled=false}catch(e){out.textContent=e.message;b.disabled=true}}
-function persistirLote(next,raw){if(storageError)throw Error('Hay datos locales dañados.');if(localStorage.getItem(KCUENTAS)!==raw)throw Error('Los datos cambiaron en otra pestaña. Recarga antes de intentar de nuevo.');localStorage.setItem(KCUENTAS,JSON.stringify(next));cuentas=next}
+function persistirLote(next,raw){if(storageError)throw Error('Hay datos locales dañados.');if(localStorage.getItem(KCUENTAS)!==raw)throw Error('Los datos cambiaron en otra pestaña. Recarga antes de intentar de nuevo.');guardarCambios({[KCUENTAS]:JSON.stringify(next)});cuentas=next}
 function confirmarLote(){
  try{
   if(!loteSnapshot||loteSnapshot.clave!==el('filtroContactoFin').value||loteSnapshot.datos!==JSON.stringify(cuentas)||loteSnapshot.raw!==loteSnapshot.datos)throw Error('Las cuentas cambiaron; abre el panel nuevamente.');
