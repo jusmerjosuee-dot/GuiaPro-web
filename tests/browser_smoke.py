@@ -172,12 +172,48 @@ with sync_playwright() as p:
     backup_file=download.value.path()
     exported=json.loads(backup_file.read_text(encoding="utf-8"))
     assert len(exported["tours"])==1 and len(exported["endosos"])==1
-    page.locator("#archivoRespaldo").set_input_files({"name":"bad.json","mimeType":"application/json","buffer":b'{"app":"GuiaPro"}'})
-    assert any("Formato de respaldo" in msg or "No se pudo importar" in msg for msg in dialogs),dialogs
-    page.locator("#archivoRespaldo").set_input_files(str(backup_file))
+    with page.expect_event("dialog") as invalid_dialog:
+        page.locator("#archivoRespaldo").set_input_files({"name":"bad.json","mimeType":"application/json","buffer":b'{"app":"GuiaPro"}'})
+    assert "No se pudo importar" in invalid_dialog.value.message,dialogs
+    with page.expect_event("dialog",predicate=lambda d:d.type=="alert") as restore_result:
+        page.locator("#archivoRespaldo").set_input_files(str(backup_file))
+    assert "Respaldo restaurado" in restore_result.value.message,dialogs
     page.locator("#nav-finanzas").click()
     expect(page.locator("#finEgresos")).to_have_text("S/ 20.00")
     print("PASS actual JSON download, invalid import rejection and file restore",flush=True)
+    # Check a normal manual account's paid/closed and reopened states.
+    page.locator("#filtroContactoFin").select_option("")
+    page.get_by_role("button",name="+ Cuenta por cobrar / pagar",exact=True).click()
+    page.locator("#formCuenta [name=concepto]").fill("Cuenta QA ficticia")
+    page.locator("#formCuenta [name=tercero]").fill("Contacto QA")
+    page.locator("#formCuenta [name=monto]").fill("100")
+    page.locator("#formCuenta button[type=submit]").click()
+    entry=page.locator("#listaCuentas .entry").filter(has_text="Cuenta QA ficticia")
+    entry.get_by_role("button",name="+ Pago",exact=True).click()
+    page.locator("#formPago button[type=submit]").click()
+    expect(page.locator("#listaCuentas")).not_to_contain_text("Cuenta QA ficticia")
+    page.locator("#tituloHistorialCuentas").click()
+    entry=page.locator("#listaCuentasCerradas .entry").filter(has_text="Cuenta QA ficticia")
+    expect(entry).to_be_visible()
+    entry.get_by_role("button",name="Editar",exact=True).click()
+    page.locator("#formCuenta [name=monto]").fill("125")
+    page.locator("#formCuenta button[type=submit]").click()
+    expect(page.locator("#listaCuentas .entry").filter(has_text="Cuenta QA ficticia")).to_contain_text("S/ 25.00")
+    print("PASS manual payment, closed account and reopening after edit",flush=True)
+    # Another tab must not overwrite a change made from the first tab.
+    other=context.new_page()
+    other.on("dialog",handle_dialog)
+    other.goto(url)
+    other.locator("#nav-ajustes").click()
+    page.locator("#nav-ajustes").click()
+    page.locator("#margen").select_option("30")
+    with other.expect_event("dialog") as stale:
+        other.locator("#margen").select_option("45")
+    assert "otra pestaña" in stale.value.message,dialogs
+    assert page.evaluate("JSON.parse(localStorage.getItem('guiapro_ajustes_v2')).margen")==30
+    other.close()
+    print("PASS stale second tab cannot overwrite saved data",flush=True)
+
     for theme in ("light","dark"):
         page.locator("#nav-ajustes").click()
         page.locator("#temaSelect").select_option(theme)
