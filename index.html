@@ -137,7 +137,7 @@ function sincronizarEndosoRecibido(t){
  endosos.push({id:uid(),tipo:'Recibido',tourId:t.id,colegaId:colega.id,monto:Number(t.tarifa)||0,estado,notas:'Generado desde Nuevo tour',automaticoTour:true,historial:[{fecha:new Date().toISOString(),estado,tipo:'Recibido',colegaId:colega.id}]});
 }
 
-function guardarTourPreparado(t,irEndoso=false){const prev={tours,cuentas,endosos,contactos};const old=tours.find(x=>x.id===t.id);tours=old?tours.map(x=>x.id===t.id?t:x):[...tours,t];
+function guardarTourPreparado(t,irEndoso=false){const prev=JSON.parse(JSON.stringify({tours,cuentas,endosos,contactos}));const old=tours.find(x=>x.id===t.id);tours=old?tours.map(x=>x.id===t.id?t:x):[...tours,t];
  sincronizarEndosoRecibido(t);
  const vinculado=endosos.find(e=>e.tourId===t.id&&e.tipo==='Recibido'&&e.automaticoTour);
  if(vinculado){
@@ -148,7 +148,7 @@ function guardarTourPreparado(t,irEndoso=false){const prev={tours,cuentas,endoso
  sincronizarFinanzas();if(!save()){tours=prev.tours;cuentas=prev.cuentas;endosos=prev.endosos;contactos=prev.contactos;return}pendienteConflicto=null;el('conflictoModal').classList.add('hidden');if(irEndoso){if(!contactos.some(c=>c.tipo==='Colega'&&!c.archivado)){alert('Tour guardado. Registra primero un colega en Contactos para endosarlo.');mostrar('contactos');return}nuevoEndoso();el('endosoTour').value=t.id;el('endosoTipo').value='Entregado'}else mostrar('tours')}
 function resolverConflicto(endosar){if(pendienteConflicto)guardarTourPreparado(pendienteConflicto,endosar)}
 function cancelarConflicto(){pendienteConflicto=null;el('conflictoModal').classList.add('hidden')}
-el('formTour').addEventListener('submit',e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));if(mins(data.ingreso)===null){alert('Indica una hora de ingreso válida.');return}data.hora=data.ingreso;data.salida='';data.duracion=data.duracion||'150';const old=tours.find(t=>t.id===data.id);if(data.contactoId){const c=contactos.find(c=>c.id===data.contactoId&&!c.archivado);if(c)data.contacto=c.nombre;else data.contactoId=''}const t={...old,...data,id:data.id||uid()};if(!String(t.nombre||'').trim()||!Number.isInteger(Number(t.pax))||Number(t.pax)<1||Number(t.pax)>100||!Number.isFinite(Number(t.tarifa))||Number(t.tarifa)<0){alert('Revisa nombre, cantidad de pasajeros y tarifa.');return}if(['Endoso recibido','Agencia'].includes(t.origen)&&!String(t.contacto||'').trim()){alert('Indica la agencia o colega que contrató el servicio.');return}const hits=clashes({...t,tipo:'tour'});if(hits.length){pendienteConflicto=t;el('conflictoTexto').textContent='Coincide con: '+hits.map(label).join(', ')+'. ¿Cómo deseas continuar?';el('conflictoModal').classList.remove('hidden');return}guardarTourPreparado(t)});
+el('formTour').addEventListener('submit',e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));if(mins(data.ingreso)===null){alert('Indica una hora de ingreso válida.');return}data.hora=data.ingreso;data.salida='';data.duracion=data.duracion||'150';const old=tours.find(t=>t.id===data.id);if(data.contactoId){const c=contactos.find(c=>c.id===data.contactoId&&!c.archivado);if(c)data.contacto=c.nombre;else data.contactoId=''}const t={...old,...data,id:data.id||uid()};if(t.origen==='Directo'&&(!old||old.origen!=='Directo'))t.contabilizarDirecto=true;if(!String(t.nombre||'').trim()||!Number.isInteger(Number(t.pax))||Number(t.pax)<1||Number(t.pax)>100||!Number.isFinite(Number(t.tarifa))||Number(t.tarifa)<0){alert('Revisa nombre, cantidad de pasajeros y tarifa.');return}if(['Endoso recibido','Agencia'].includes(t.origen)&&!String(t.contacto||'').trim()){alert('Indica la agencia o colega que contrató el servicio.');return}if(old&&cuentas.some(c=>(c.relacion==='tour:'+old.id||endosos.some(en=>en.tourId===old.id&&en.automaticoTour&&c.relacion==='endoso:'+en.id))&&(c.pagos||[]).length)&&(old.origen!==t.origen||cambiaContraparte({tercero:old.contacto||(old.origen==='Directo'?old.nombre:''),contactoId:old.contactoId},{tercero:t.contacto||(t.origen==='Directo'?t.nombre:''),contactoId:t.contactoId}))){alert('Este servicio tiene pagos. No cambies su contratante sin revisar y revertir los pagos correspondientes.');return}const hits=clashes({...t,tipo:'tour'});if(hits.length){pendienteConflicto=t;el('conflictoTexto').textContent='Coincide con: '+hits.map(label).join(', ')+'. ¿Cómo deseas continuar?';el('conflictoModal').classList.remove('hidden');return}guardarTourPreparado(t)});
 function nuevoBloqueo(){newForm(el('formBloqueo'));el('tituloBloqueo').textContent='Bloqueo personal';mostrar('bloqueoForm')}
 function editarBloqueo(id){const b=blocks.find(x=>x.id===id);if(!b)return;newForm(el('formBloqueo'));for(const [k,v] of Object.entries(b))if(el('formBloqueo').elements[k])el('formBloqueo').elements[k].value=v;el('tituloBloqueo').textContent='Editar bloqueo';mostrar('bloqueoForm')}
 function borrarBloqueo(id){if(!confirm('¿Eliminar bloqueo?'))return;const prev=[...blocks];blocks=blocks.filter(x=>x.id!==id);if(!save())blocks=prev;render()}
@@ -219,21 +219,43 @@ function nuevoEndoso(){if(!tours.length){alert('Primero registra un tour.');retu
 function editarEndoso(id){const e=endosos.find(x=>x.id===id);if(!e)return;nuevoEndoso();const f=el('formEndoso');if(![...el('endosoTour').options].some(o=>o.value===e.tourId))el('endosoTour').add(new Option('Tour archivado',e.tourId));if(![...el('endosoColega').options].some(o=>o.value===e.colegaId))el('endosoColega').add(new Option(nombreColega(e.colegaId),e.colegaId));for(const [k,v] of Object.entries(e))if(f.elements[k])f.elements[k].value=v}
 function renderEndosos(){el('listaEndosos').innerHTML=endosos.length?endosos.map(e=>{const t=tours.find(x=>x.id===e.tourId);return `<div class="entry"><b>${esc(e.tipo)} · ${esc(t?.nombre||'Tour no encontrado')}</b><p class="muted">${esc(nombreColega(e.colegaId))} · S/ ${Number(e.monto||0).toFixed(2)} · ${esc(e.estado)}</p>${e.tipo==='Entregado'&&e.estado==='Pendiente'?'<p class="warning">Pendiente: el horario sigue reservado.</p>':''}${e.tipo==='Entregado'&&e.estado==='Aceptado'?'<p class="info">Aceptado: el horario queda libre en tu agenda.</p>':''}<button class="secondary" onclick="editarEndoso('${e.id}')">Editar estado</button><button class="danger" onclick="borrarEndoso('${e.id}')">Eliminar</button></div>`}).join(''):'<p class="muted">Todavía no hay endosos.</p>'}
 function borrarEndoso(id){const e=endosos.find(x=>x.id===id);if(!e)return;const ligados=cuentas.filter(c=>c.relacion==='endoso:'+id);if(ligados.some(c=>(c.pagos||[]).length)){alert('Este endoso tiene pagos registrados. Revisa su historial financiero antes de eliminarlo.');return}if(!confirm('¿Eliminar endoso y sus cuentas automáticas sin pagos?'))return;const prev={endosos,cuentas};endosos=endosos.filter(x=>x.id!==id);cuentas=cuentas.filter(c=>!ligados.some(x=>x.id===c.id));if(!save()){endosos=prev.endosos;cuentas=prev.cuentas}render()}
-el('formEndoso').addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target)),old=endosos.find(x=>x.id===d.id);if(d.tipo==='Entregado'&&d.estado==='Aceptado'&&!confirm('Confirmas que el colega ACEPTÓ este tour? Se liberará tu horario.'))return;const item={...old,...d,id:d.id||uid(),historial:[...(old?.historial||[]),{fecha:new Date().toISOString(),estado:d.estado,tipo:d.tipo,colegaId:d.colegaId}]};endosos=old?endosos.map(x=>x.id===item.id?item:x):[...endosos,item];sincronizarFinanzas();if(save())mostrar('endosos')});
+el('formEndoso').addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target)),old=endosos.find(x=>x.id===d.id),prev=JSON.parse(JSON.stringify({endosos,cuentas}));if(d.tipo==='Entregado'&&d.estado==='Aceptado'&&!confirm('Confirmas que el colega ACEPTÓ este tour? Se liberará tu horario.'))return;if(old&&cuentas.some(c=>c.relacion==='endoso:'+old.id&&(c.pagos||[]).length)&&(old.colegaId!==d.colegaId||old.tourId!==d.tourId||old.tipo!==d.tipo)){alert('Este endoso tiene pagos. Revisa su historial antes de cambiar contraparte, tour o tipo.');return}const item={...old,...d,id:d.id||uid(),historial:[...(old?.historial||[]),{fecha:new Date().toISOString(),estado:d.estado,tipo:d.tipo,colegaId:d.colegaId}]};endosos=old?endosos.map(x=>x.id===item.id?item:x):[...endosos,item];sincronizarFinanzas();if(save())mostrar('endosos');else{endosos=prev.endosos;cuentas=prev.cuentas}});
 
 // Cuentas automáticas: una sola por referencia; se preservan pagos y no se duplican.
+function cambiaContraparte(a,b){
+ const norm=v=>String(v||'').trim().toLocaleLowerCase('es').replace(/\s+/g,' ');
+ if(a.contactoId&&b.contactoId)return a.contactoId!==b.contactoId;
+ return norm(a.tercero)!==norm(b.tercero);
+}
 function sincronizarFinanzas(){
  const specs=[];
- for(const t of tours){if(t.origen==='Agencia'&&t.estado!=='Cancelado'&&Number(t.tarifa)>0){specs.push({relacion:'tour:'+t.id,tipo:'Cobrar',concepto:'Guiado agencia · '+(t.contacto||'Agencia')+' · '+t.nombre,tercero:t.contacto||'Agencia',monto:Number(t.tarifa),vence:t.fecha})}}
- for(const e of endosos){if(e.estado!=='Aceptado'||Number(e.monto)<=0)continue;const t=tours.find(x=>x.id===e.tourId);specs.push({relacion:'endoso:'+e.id,tipo:e.tipo==='Entregado'?'Pagar':'Cobrar',concepto:'Endoso '+e.tipo.toLowerCase()+' · '+(t?.contacto?t.contacto+' · ':'')+(t?.nombre||'Tour'),tercero:nombreColega(e.colegaId),monto:Number(e.monto),vence:t?.fecha||''})}
- for(const spec of specs){let c=cuentas.find(x=>x.automatico&&x.relacion===spec.relacion);if(!c){if(cuentas.some(x=>x.relacion===spec.relacion))continue;cuentas.push({...spec,id:uid(),automatico:true,pagos:[],notas:''});continue}const pagado=(c.pagos||[]).reduce((a,p)=>a+Math.round(Number(p.monto)*100),0);const nuevo=Math.round(spec.monto*100);Object.assign(c,{...spec,monto:(Math.max(nuevo,pagado)/100).toFixed(2),revision:nuevo<pagado?'Monto original menor que los pagos realizados; revisar.':''})}
- // No borrar pagos si se cancela una operación; señalarla para revisión.
- for(const c of cuentas.filter(x=>x.automatico&&!specs.some(y=>y.relacion===x.relacion))){c.revision='Operación cancelada o eliminada: revisar cuenta.'}
+ for(const t of tours){
+  if(t.estado==='Cancelado'||Number(t.tarifa)<=0)continue;
+  if(t.origen==='Agencia'||(t.origen==='Directo'&&t.contabilizarDirecto===true)){
+   const tercero=t.contacto||(t.origen==='Agencia'?'Agencia':t.nombre);
+   specs.push({relacion:'tour:'+t.id,tipo:'Cobrar',concepto:'Guiado '+(t.origen==='Agencia'?'agencia':'directo')+' · '+t.nombre,tercero,contactoId:t.contactoId||'',monto:Number(t.tarifa),vence:t.fecha});
+  }
+ }
+ for(const e of endosos){
+  if(e.estado!=='Aceptado'||Number(e.monto)<=0)continue;
+  const t=tours.find(x=>x.id===e.tourId);if(!t||t.estado==='Cancelado')continue;
+  specs.push({relacion:'endoso:'+e.id,tipo:e.tipo==='Entregado'?'Pagar':'Cobrar',concepto:'Endoso '+e.tipo.toLowerCase()+' · '+t.nombre,tercero:nombreColega(e.colegaId),contactoId:e.colegaId||'',monto:Number(e.monto),vence:t.fecha||''});
+ }
+ for(const spec of specs){
+  let c=cuentas.find(x=>x.automatico&&x.relacion===spec.relacion);
+  if(!c){if(cuentas.some(x=>x.relacion===spec.relacion))continue;cuentas.push({...spec,id:uid(),automatico:true,pagos:[],notas:''});continue}
+  const pagado=(c.pagos||[]).reduce((a,p)=>a+cents(p.monto),0),nuevo=cents(spec.monto);
+  if(pagado>0&&(c.tipo!==spec.tipo||cambiaContraparte(c,spec))){c.revision='La contraparte o el tipo cambió: revisar sin mover pagos históricos.';continue}
+  Object.assign(c,{...spec,anuladoSinSaldo:false,monto:(Math.max(nuevo,pagado)/100).toFixed(2),revision:nuevo<pagado?'Monto original menor que los pagos realizados; revisar.':''});
+ }
+ for(const c of cuentas.filter(x=>x.automatico&&!specs.some(y=>y.relacion===x.relacion))){
+  c.anuladoSinSaldo=true;c.revision=(c.pagos||[]).length?'Operación cancelada; conserva pagos anteriores y revisa si corresponde devolución.':'Operación cancelada sin pagos.';
+ }
 }
 // Finanzas: cuentas y pagos parciales, sin integración bancaria.
 function cents(n){return Math.round(Number(n)*100)}
 function sol(n){return 'S/ '+(n/100).toFixed(2)}
-function saldoCuenta(c){return Math.max(0,cents(c.monto)-(c.pagos||[]).reduce((s,p)=>s+cents(p.monto),0))}
+function saldoCuenta(c){if(c.anuladoSinSaldo)return 0;return Math.max(0,cents(c.monto)-(c.pagos||[]).reduce((s,p)=>s+cents(p.monto),0))}
 function opcionesRelacion(){return '<option value="">Sin vincular</option>'+tours.map(t=>`<option value="tour:${esc(t.id)}">${t.origen==='Endoso recibido'?'Tour · Endoso recibido':'Tour'}: ${esc(t.nombre)} · ${esc(t.fecha)}</option>`).join('')+endosos.map(e=>`<option value="endoso:${esc(e.id)}">Endoso: ${esc(nombreColega(e.colegaId))} · ${esc(e.tipo)}</option>`).join('')}
 function prepararContactoCuenta(){el('cuentaContactoId').innerHTML='<option value="">Sin vincular</option>'+contactos.filter(c=>!c.archivado).sort((a,b)=>a.nombre.localeCompare(b.nombre,'es')).map(c=>`<option value="${esc(c.id)}">${esc(c.nombre)} (${esc(c.tipo)})</option>`).join('')}
 function seleccionarContactoCuenta(){const c=contactos.find(x=>x.id===el('cuentaContactoId').value);if(c)el('formCuenta').elements.tercero.value=c.nombre}
@@ -241,10 +263,12 @@ function nuevaCuenta(){const f=el('formCuenta');f.reset();f.elements.id.value=''
 function editarCuenta(id){const c=cuentas.find(x=>x.id===id);if(!c)return;if(c.automatico){alert('Cuenta automática: edita la tarifa del tour o el importe del endoso.');return}nuevaCuenta();const f=el('formCuenta');for(const [k,v] of Object.entries(c))if(f.elements[k])f.elements[k].value=v;if(c.relacion&&!Array.from(el('cuentaRelacion').options).some(o=>o.value===c.relacion))el('cuentaRelacion').add(new Option('Referencia anterior',c.relacion));el('tituloCuenta').textContent='Editar cuenta'}
 // Identidad de la contraparte: usar el vínculo del origen si existe; nombres antiguos como alternativa.
 function terceroCuenta(c){
+ if(c.contactoId){const k=contactos.find(x=>x.id===c.contactoId);if(k)return {id:k.id,nombre:k.nombre};}
+ if((c.pagos||[]).length&&c.tercero)return {id:'',nombre:String(c.tercero)};
  const rel=String(c.relacion||'');
  if(rel.startsWith('endoso:')){const e=endosos.find(x=>x.id===rel.slice(7));if(e){const k=contactos.find(x=>x.id===e.colegaId);if(k)return {id:k.id,nombre:k.nombre};}}
- if(rel.startsWith('tour:')){const t=tours.find(x=>x.id===rel.slice(5));if(t&&t.origen==='Agencia'){
-   const k=contactos.find(x=>x.id===t.contactoId&&x.tipo==='Agencia');if(k)return {id:k.id,nombre:k.nombre};
+ if(rel.startsWith('tour:')){const t=tours.find(x=>x.id===rel.slice(5));if(t&&['Agencia','Directo'].includes(t.origen)){
+   const k=contactos.find(x=>x.id===t.contactoId&&x.tipo===(t.origen==='Agencia'?'Agencia':'Pasajero'));if(k)return {id:k.id,nombre:k.nombre};
  }}
  if(c.contactoId){const k=contactos.find(x=>x.id===c.contactoId);if(k)return {id:k.id,nombre:k.nombre};}
  const nombre=String(c.tercero||'').trim();return {id:'',nombre:nombre||'Sin contacto'};
@@ -282,13 +306,13 @@ function renderFinanzas(){
  el('finEgresos').textContent=sol(pagado('Pagar'));
  const resumen=el('finResumenContacto');
  if(contacto){
-  const bruto=tipo=>base.filter(c=>c.tipo===tipo).reduce((s,c)=>s+cents(c.monto),0);
+  const bruto=tipo=>base.filter(c=>c.tipo===tipo&&!c.anuladoSinSaldo).reduce((s,c)=>s+cents(c.monto),0);
   resumen.textContent='Estado del contacto · Total facturado por cobrar: '+sol(bruto('Cobrar'))+' · Cobrado: '+sol(pagado('Cobrar'))+' · Pendiente de cobro: '+sol(total('Cobrar'))+' · Total por pagar: '+sol(bruto('Pagar'))+' · Pagado: '+sol(pagado('Pagar'))+' · Pendiente de pago: '+sol(total('Pagar'));
   resumen.classList.remove('hidden');
  }else{resumen.textContent='';resumen.classList.add('hidden')}
  const filtro=el('filtroCuenta').value;
  const visibles=base.filter(c=>filtro==='Todas'||filtro==='Pendientes'||c.tipo===filtro).sort((a,b)=>(a.vence||'9999').localeCompare(b.vence||'9999'));
- const pintarCuenta=c=>{const saldo=saldoCuenta(c),vencida=saldo>0&&c.vence&&c.vence<today();return `<div class="entry"><div class="row"><b>${esc(c.concepto)}</b><span class="pill">${saldo===0?(c.tipo==='Cobrar'?'Cobrado':'Pagado'):(c.tipo==='Cobrar'?'Por cobrar':'Por pagar')}</span></div><p class="muted">${esc(c.tercero||'Sin contacto')} · Total ${sol(cents(c.monto))} · ${c.vence?'Vence '+esc(c.vence):'Sin vencimiento'}</p><b class="${c.tipo==='Cobrar'?'moneyplus':'moneyminus'}">Saldo: ${sol(saldo)}</b>${vencida?'<p class="warning">⚠ Saldo vencido</p>':''}${c.revision?'<p class="warning">⚠ '+esc(c.revision)+'</p>':''}<p class="fine">${(c.pagos||[]).length} pago(s) registrado(s)</p><button class="secondary" onclick="editarCuenta('${esc(c.id)}')">Editar</button>${saldo>0?`<button onclick="nuevoPago('${esc(c.id)}')">+ Pago</button>`:''}<button class="secondary" onclick="verPagos('${esc(c.id)}')">Historial</button><button class="danger" onclick="borrarCuenta('${esc(c.id)}')">Eliminar</button></div>`};
+ const pintarCuenta=c=>{const saldo=saldoCuenta(c),vencida=saldo>0&&c.vence&&c.vence<today();return `<div class="entry"><div class="row"><b>${esc(c.concepto)}</b><span class="pill">${c.anuladoSinSaldo?'Anulado':saldo===0?(c.tipo==='Cobrar'?'Cobrado':'Pagado'):(c.tipo==='Cobrar'?'Por cobrar':'Por pagar')}</span></div><p class="muted">${esc(c.tercero||'Sin contacto')} · Total ${sol(cents(c.monto))} · ${c.vence?'Vence '+esc(c.vence):'Sin vencimiento'}</p><b class="${c.tipo==='Cobrar'?'moneyplus':'moneyminus'}">Saldo: ${sol(saldo)}</b>${vencida?'<p class="warning">⚠ Saldo vencido</p>':''}${c.revision?'<p class="warning">⚠ '+esc(c.revision)+'</p>':''}<p class="fine">${(c.pagos||[]).length} pago(s) registrado(s)</p><button class="secondary" onclick="editarCuenta('${esc(c.id)}')">Editar</button>${saldo>0?`<button onclick="nuevoPago('${esc(c.id)}')">+ Pago</button>`:''}<button class="secondary" onclick="verPagos('${esc(c.id)}')">Historial</button><button class="danger" onclick="borrarCuenta('${esc(c.id)}')">Eliminar</button></div>`};
  const pendientes=visibles.filter(c=>saldoCuenta(c)>0),cerradas=visibles.filter(c=>saldoCuenta(c)===0);
  el('listaCuentas').innerHTML=pendientes.map(pintarCuenta).join('')||'<p class="muted">No hay cuentas pendientes para este filtro.</p>';
  el('tituloHistorialCuentas').textContent='Historial de pagados y cobrados ('+cerradas.length+')';
@@ -297,7 +321,7 @@ function renderFinanzas(){
 function borrarCuenta(id){const c=cuentas.find(x=>x.id===id);if(c?.pagos?.some(p=>p.loteId)){alert('Revierte primero la liquidación agrupada para conservar su historial.');return}if(c?.automatico){alert('Esta cuenta está sincronizada con un tour o endoso. Edita o elimina su origen.');return}if(!c||!confirm('¿Eliminar esta cuenta y todo su historial de pagos?'))return;const previo=cuentas;cuentas=cuentas.filter(x=>x.id!==id);if(!save())cuentas=previo;render()}
 function nuevoPago(id){const c=cuentas.find(x=>x.id===id);if(!c||saldoCuenta(c)<=0)return;const f=el('formPago');f.reset();f.elements.cuentaId.value=id;f.elements.fecha.value=today();f.elements.monto.value=(saldoCuenta(c)/100).toFixed(2);f.elements.monto.max=(saldoCuenta(c)/100).toFixed(2);el('pagoResumen').textContent=c.concepto+' · Saldo '+sol(saldoCuenta(c));mostrar('pagoForm')}
 function verPagos(id){const c=cuentas.find(x=>x.id===id);if(!c)return;const detalle=(c.pagos||[]).map((p,i)=>`${i+1}. ${p.fecha} · ${sol(cents(p.monto))} · ${p.medio} ${p.nota||''}`).join('\n');alert(c.concepto+'\n'+(detalle||'Sin pagos')+'\nSaldo: '+sol(saldoCuenta(c)))}
-el('formCuenta').addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));if(!Number.isFinite(Number(d.monto))||cents(d.monto)<=0){alert('Ingresa un monto válido.');return}const old=cuentas.find(c=>c.id===d.id);const pagos=old?.pagos||[];if(cents(d.monto)<pagos.reduce((s,p)=>s+cents(p.monto),0)){alert('El monto no puede ser menor a lo ya pagado.');return}const c={...old,...d,id:d.id||uid(),monto:(cents(d.monto)/100).toFixed(2),pagos};const previo=cuentas;cuentas=old?cuentas.map(x=>x.id===c.id?c:x):[...cuentas,c];if(!save()){cuentas=previo;return}mostrar('finanzas')});
+el('formCuenta').addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target));if(!Number.isFinite(Number(d.monto))||cents(d.monto)<=0){alert('Ingresa un monto válido.');return}const old=cuentas.find(c=>c.id===d.id);const pagos=old?.pagos||[];if(pagos.length&&(old.tipo!==d.tipo||old.relacion!==d.relacion||cambiaContraparte(old,d))){alert('No puedes cambiar la contraparte, tipo o vínculo de una cuenta que tiene pagos.');return}if(cents(d.monto)<pagos.reduce((s,p)=>s+cents(p.monto),0)){alert('El monto no puede ser menor a lo ya pagado.');return}const c={...old,...d,id:d.id||uid(),monto:(cents(d.monto)/100).toFixed(2),pagos};const previo=cuentas;cuentas=old?cuentas.map(x=>x.id===c.id?c:x):[...cuentas,c];if(!save()){cuentas=previo;return}mostrar('finanzas')});
 el('formPago').addEventListener('submit',e=>{e.preventDefault();const d=Object.fromEntries(new FormData(e.target)),c=cuentas.find(x=>x.id===d.cuentaId);if(!c)return;const n=cents(d.monto);if(!Number.isFinite(n)||n<=0||n>saldoCuenta(c)){alert('El pago debe ser positivo y no superar el saldo.');return}const previo=cuentas;cuentas=cuentas.map(x=>x.id===c.id?{...x,pagos:[...(x.pagos||[]),{id:uid(),fecha:d.fecha,medio:d.medio,nota:d.nota,monto:(n/100).toFixed(2)}]}:x);if(!save()){cuentas=previo;return}mostrar('finanzas')});
 
 
